@@ -18,6 +18,52 @@ AsyncUDP udp;
 // La cola pasa el mensaje de la tarea del sensor a la tarea UDP
 QueueHandle_t messageQueue;
 
+void setup() {
+  Serial.begin(115200);
+  SPI.begin();
+  mfrc522.PCD_Init();
+  WiFi_begin();
+  UDP_begin();
+  delay(2000); //Espera para que inicie todo
+
+  messageQueue = xQueueCreate(5, sizeof(char[64]));
+
+  // Crear las tareas con pilas y prioridades
+  xTaskCreate(WiFiTask, "WiFiTask", 2048, NULL, 1, NULL);
+  xTaskCreate(RFIDTask, "RFIDTask", 4096, NULL, 2, NULL);
+  xTaskCreate(UDPTask, "UDPTask", 2048, NULL, 3, NULL);
+}
+
+// Parám: ssid, password (globales)
+// Devuelve: string
+// Conecta a WiFi
+void WiFi_begin() {
+  delay(10);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.println("Conectando a WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    M5.Lcd.print(".");
+    delay(500);
+  }
+
+  // Conexión establecida
+  Serial.println("\nWiFi conectado!");
+  M5.Lcd.clear();
+  M5.Lcd.println("WiFi conectado!");
+}
+
+// Parám: serverIP, udpPort (globales)
+// Devuelve: string
+// Conecta a UDP
+void UDP_begin() {
+  if (udp.connect(serverIP, udpPort)) {
+    Serial.println("UDP listo");
+  } else {
+    Serial.println("ERROR: UDP no conectado");
+  }
+}
+
 // Parám: parameter (no lo usa)
 // Devuelve: no devuelve valor
 // Mantiene la conexión WiFi
@@ -40,7 +86,7 @@ void WiFiTask(void *parameter) {
 
 // Parám: parameter (no lo usa)
 // Devuelve: no devuelve valor
-// Mantiene la conexión WiFi
+// Lee sensor
 void RFIDTask(void *parameter) {
   for (;;) {
     byte res = mfrc522.PCD_ReadRegister(MFRC522::VersionReg);
@@ -98,35 +144,6 @@ void UDPTask(void *parameter) {
   }
 
   vTaskDelay(50 / portTICK_PERIOD_MS);
-}
-
-void setup() {
-  Serial.begin(115200);
-  SPI.begin();
-  mfrc522.PCD_Init();
-  delay(2000);
-
-  //Conectar WiFi
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi conectado!");
-
-  //Conectar UDP
-  if (udp.connect(serverIP, udpPort)) {
-    Serial.println("UDP listo");
-  } else {
-    Serial.println("ERROR: UDP no conectado");
-  }
-
-  messageQueue = xQueueCreate(5, sizeof(char[64]));
-
-  // Crear las tareas con pilas y prioridades
-  xTaskCreate(WiFiTask, "WiFiTask", 2048, NULL, 1, NULL);
-  xTaskCreate(RFIDTask, "RFIDTask", 4096, NULL, 2, NULL);
-  xTaskCreate(UDPTask, "UDPTask", 2048, NULL, 3, NULL);
 }
 
 void loop() {

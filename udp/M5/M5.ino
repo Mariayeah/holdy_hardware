@@ -1,6 +1,7 @@
 #include <M5Stack.h>
 #include <WiFi.h>
 #include <AsyncUDP.h>
+#include <PubSubClient.h>
 
 const char *ssid = "";
 const char *password = "";
@@ -8,6 +9,45 @@ const char *password = "";
 const int udpPort = 12345;
 
 AsyncUDP udp;
+
+const char* mqtt_broker = "broker.hivemq.com";  
+const char* topic = "holdy/lecturas";
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+void setup() {
+  // Inicialización del M5Stack, monitor serie y WiFi
+  M5.begin();
+  Serial.begin(115200);
+  WiFiBegin();
+  delay(2000); //Espera para que inicie todo
+
+  // Crear las tareas con pilas y prioridades
+  xTaskCreate(WiFiTask, "WiFiTask", 2048, NULL, 1, NULL);
+  xTaskCreate(UDPTask, "UDPTask", 2048, NULL, 2, NULL);
+}
+
+// Parám: ssid, password (globales)
+// Devuelve:
+// Conecta a WiFi
+void WiFiBegin() {
+    delay(10);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.println("Conectando a WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    M5.Lcd.print(".");
+    delay(500);
+  }
+
+  // Conexión establecida
+  Serial.println("\nWiFi conectado!");
+  M5.Lcd.clear();
+  M5.Lcd.println("WiFi conectado!");
+  IPAddress localIP = WiFi.localIP();
+  Serial.println("IP local: ");
+  Serial.print(localIP); //La uso para la conexion y enviar paquetes.
+}
 
 // Parám: parameter (no lo usa)
 // Devuelve: no devuelve valor
@@ -57,32 +97,6 @@ void UDPTask(void *parameter) {
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
-
-void setup() {
-  // Inicialización del hardware M5Stack y el monitor serie
-  M5.begin();
-  Serial.begin(115200);
-
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.println("Conectando a WiFi...");
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    M5.Lcd.print(".");
-    delay(500);
-  }
-
-  // Conexión establecida
-  Serial.println("\nWiFi conectado!");
-  M5.Lcd.println("WiFi conectado!");
-  IPAddress localIP = WiFi.localIP();
-  Serial.println("IP local: ");
-  Serial.print(localIP); //La uso para la conexion y enviar paquetes.
-
-  // Crear las tareas con pilas y prioridades
-  xTaskCreate(WiFiTask, "WiFiTask", 2048, NULL, 1, NULL);
-  xTaskCreate(UDPTask, "UDPTask", 2048, NULL, 2, NULL);
-}
-
 
 void loop() {
   // No se necesita código en loop; FreeRTOS gestiona las tareas
