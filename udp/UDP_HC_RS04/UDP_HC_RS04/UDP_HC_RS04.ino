@@ -1,8 +1,8 @@
 #include <WiFi.h>
 #include <AsyncUDP.h>
 
-#define TRIG 12
-#define ECHO 15
+#define TRIG 5
+#define ECHO 18
 
 const char* ssid = "Pixel_8214";
 const char* password = "9aedsxm5zkite3u";
@@ -37,26 +37,38 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
-  Serial.println();
-  Serial.println("Conectado. IP local:");
+  Serial.println("\nWiFi conectado");
   Serial.println(WiFi.localIP());
 
-  udp.connect(destinoIP, destinoPort);
-  Serial.println("UDP conectado al servidor destino.");
+  if (!udp.connect(destinoIP, destinoPort)) {
+    Serial.println("ERROR al conectar UDP");
+  } else {
+    Serial.println("UDP listo!");
+  }
 }
 
 void loop() {
   float dist = medirDistancia();
-  String mensaje = isnan(dist) ? "sin_eco" : String(dist, 1);
+  static bool objetoCerca = false;
 
-  // Enviar la distancia a la IP destino
-  udp.print(mensaje);
+  if (!isnan(dist) && dist < 10.0) {
+    if (!objetoCerca) {
+      objetoCerca = true;
+      String msg = "INFRA: ALGUIEN DELANTE";
+      udp.write((uint8_t*)msg.c_str(), msg.length());
+      Serial.println(msg);
+    }
+  } else {
+    if (objetoCerca) {
+      objetoCerca = false;
+      String msg = "INFRA: Zona despejada";
+      udp.write((uint8_t*)msg.c_str(), msg.length());
+      Serial.println(msg);
+    }
+  }
 
-  Serial.print("Enviado a ");
-  Serial.print(destinoIP);
-  Serial.print(": ");
-  Serial.println(mensaje);
-
-  delay(500);  // envía dos veces por segundo
+  delay(200);
 }
+
+
 

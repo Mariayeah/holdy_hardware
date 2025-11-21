@@ -3,12 +3,13 @@
 #include <WiFi.h>
 #include <AsyncUDP.h>
 
+
 #define SS_PIN 17
 #define RST_PIN 22
 
-const char *ssid = "";
-const char *password = "";
-const IPAddress serverIP(192, 168, 2, 136);  //IP del m5stack
+const char* ssid = "Pixel_8214";
+const char* password = "9aedsxm5zkite3u";
+const IPAddress serverIP(10, 197, 27, 208);  //IP del m5stack
 const int udpPort = 12345;
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);
@@ -17,6 +18,12 @@ AsyncUDP udp;
 
 // La cola pasa el mensaje de la tarea del sensor a la tarea UDP
 QueueHandle_t messageQueue;
+
+void sendToM5(String msg) {
+  udp.write((uint8_t*)msg.c_str(), msg.length());
+  Serial.println("Enviado al M5: " + msg);
+}
+
 
 void setup() {
   Serial.begin(115200);
@@ -39,18 +46,15 @@ void setup() {
 // Conecta a WiFi
 void WiFi_begin() {
   delay(10);
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.println("Conectando a WiFi...");
+  Serial.println("Conectando a WiFi...");
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    M5.Lcd.print(".");
+    Serial.print(".");
     delay(500);
   }
 
   // Conexión establecida
   Serial.println("\nWiFi conectado!");
-  M5.Lcd.clear();
-  M5.Lcd.println("WiFi conectado!");
 }
 
 // Parám: serverIP, udpPort (globales)
@@ -72,9 +76,7 @@ void WiFiTask(void *parameter) {
   for (;;) {
     // Si el WiFi no está conectado, intentar reconectar
     if (WiFi.status() != WL_CONNECTED) {
-      M5.Lcd.clear();
-      M5.Lcd.setCursor(0, 0);
-      M5.Lcd.println("Reinicio WiFi");
+      Serial.println("Reinicio WiFi");
       WiFi.disconnect();
       WiFi.reconnect();
       vTaskDelay(2000 / portTICK_PERIOD_MS);  // Esperar 2 segundos antes de reintentar
@@ -91,10 +93,9 @@ void RFIDTask(void *parameter) {
   for (;;) {
     byte res = mfrc522.PCD_ReadRegister(MFRC522::VersionReg);
 
-
     if (!(res == 0x92 || res == 0x91)) {
-      Serial.println("Error en lector RFID")
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
+      Serial.println("Error en lector RFID");
+      vTaskDelay(2000 / portTICK_PERIOD_MS);
       continue;
     }
 
@@ -104,11 +105,24 @@ void RFIDTask(void *parameter) {
       continue;
     }
 
+    // Verificar UID
+    bool authorized = true;
+    for (byte i = 0; i < mfrc522.uid.size; i++) {
+      if (mfrc522.uid.uidByte[i] != authorizedUID[i]) {
+        authorized = false;
+        break;
+      }
+    }
+
+    // Mensaje final
     String message;
-    if (mfrc522.uid.size == 4 && memcmp(mfrc522.uid.uidByte, authorizedUID, 4) == 0) {
-      message = "Repartidor autorizado. Proceda con la entrega.";
+
+    if (authorized) {
+      message = "RFID: Tarjeta autorizada";
+      sendToM5(message);
     } else {
-      message = "UID no autorizado. Acceso denegado.";
+      message = "RFID: Tarjeta NO autorizada";
+      sendToM5(message);
     }
 
     // Mandar mensaje a la cola
@@ -118,6 +132,7 @@ void RFIDTask(void *parameter) {
     vTaskDelay(2000 / portTICK_PERIOD_MS);
   }
 }
+
 
 
 // Parám: parameter (no lo usa)
