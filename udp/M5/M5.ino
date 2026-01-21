@@ -12,7 +12,7 @@ const char* password = "9aedsxm5zkite3u";
 // ---------------- CONFIG MQTT ----------------
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
-const char* mqtt_server = "10.191.253.232";  // Raspberry / Broker Mosquitto
+const char* mqtt_server = "10.195.102.232";  // Raspberry / Broker Mosquitto
 const int mqtt_port = 1883;
 
 // ---------------- CONFIG UDP -----------------
@@ -24,6 +24,19 @@ String msgRFID = "Esperando...";
 String msgINFRA = "Esperando...";
 
 const int pinSensor = 36;  // sensor vibración (ojo: en ESP32 GPIO36 es input only)
+
+//CODIGO CERRADURA
+#define PIN_SOLENOIDE 25   // GPIO del M5 que va a la puerta (gate) del MOSFET
+
+const char* TOPIC_LOCK_CMD   = "holdy/lock/cmd";    // Raspi manda OPEN/CLOSE
+const char* TOPIC_LOCK_STATE = "holdy/lock/state";  // M5 publica estado cerradura
+
+//
+
+bool lockOpen        = false;
+unsigned long tClose = 0;
+const unsigned long TIEMPO_APERTURA_MS = 3000;  // 3 segundos abierta
+
 
 // Flag global para evento vibración y evento capture
 volatile bool eventoVibracion = false;
@@ -68,7 +81,7 @@ void actualizarPantalla(const String& estadoVibra) {
   M5.Lcd.println("--------- HOLA! ---------");
 
   M5.Lcd.setCursor(0, 40);
-  M5.Lcd.println("Pulsa el boton de en medio para pedir abrir el buzon \n\n AVISO: \n\n Se te tomara una foto \n para saber tu identidad");
+  M5.Lcd.println("Pulsa el boton de en medio para pedir abrir el buzon o pasa la tarjeta para \n abrirlo \n\n AVISO: \n\n Si pulsas el boton se te tomara una foto \n para saber tu identidad");
 }
 
 // ------------------------------------------------------------
@@ -163,6 +176,7 @@ void reconnectMQTT() {
     if (mqttClient.connect(clientId.c_str())) {
       Serial.println("MQTT OK");
       M5.Lcd.println("MQTT conectado!");
+      mqttClient.subscribe(TOPIC_LOCK_CMD);  // escuchar comandos de cerradura
     } else {
       Serial.printf("Fallo MQTT (%d). Reintentando...\n", mqttClient.state());
       delay(2000);
@@ -174,6 +188,66 @@ void reconnectMQTT() {
 // -------------------- SENSOR TASK ----------------------------
 // Detecta sacudidas
 // ------------------------------------------------------------
+
+//CODIGO CERRADURA
+// ------------------------------------------------------------
+// ------------------ CERRADURA / MQTT ------------------------
+// ------------------------------------------------------------
+void publicarEstadoCerradura(const char* estado) {
+  mqttClient.publish(TOPIC_LOCK_STATE, estado, true);
+  Serial.print("LOCK STATE -> ");
+  Serial.println(estado);
+}
+
+// Activa el solenoide y programa el cierre automático
+void abrirCerradura() {
+  Serial.println("Abriendo cerradura...");
+  digitalWrite(PIN_SOLENOIDE, HIGH);  // ACTIVAR solenoide
+  lockOpen = true;
+  tClose   = millis() + TIEMPO_APERTURA_MS;
+  publicarEstadoCerradura("OPENING");
+}
+
+// Desactiva el solenoide
+void cerrarCerradura() {
+  Serial.println("Cerrando cerradura...");
+  digitalWrite(PIN_SOLENOIDE, LOW);   // DESACTIVAR solenoide
+  lockOpen = false;
+  publicarEstadoCerradura("CLOSED");
+}
+
+// Callback MQTT para comandos de cerradura
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  String msg;
+  for (unsigned int i = 0; i < length; i++) {
+    msg += (char)payload[i];
+  }
+
+  Serial.print("MQTT CMD [");
+  Serial.print(topic);
+  Serial.print("] -> ");
+  Serial.println(msg);
+
+  if (String(topic) == TOPIC_LOCK_CMD) {
+    msg.trim();
+    msg.toUpperCase();
+
+    if (msg == "OPEN") {
+      if (!lockOpen) {
+        abrirCerradura();
+      } else {
+        Serial.println("Cerradura ya esta abierta/abriendo");
+      }
+    } else if (msg == "CLOSE") {
+      if (lockOpen) {
+        cerrarCerradura();
+      }
+    }
+  }
+}
+
+//
+
 void SensorTask(void* pvParameters) {
   const int ventana = 10;
   const int umbral = 3;
@@ -315,7 +389,7 @@ void MqttPublishTask(void* pvParameters) {
         bool ok = mqttClient.publish("holdy/capture", (uint8_t*)payload, n, false);
         Serial.println(ok ? "Capture -> MQTT OK" : "Capture -> MQTT ERROR");
 
-        M5.Lcd.setCursor(0, 200);
+        M5.Lcd.setCursor(0, 210);
         M5.Lcd.println(ok ? "       Foto Hecha!" : "ERROR enviando captura");
         fotoMsgUntil = millis() + FOTO_MSG_MS;
       }
@@ -340,9 +414,15 @@ void setup() {
 
   pinMode(pinSensor, INPUT);
 
+  // Cerradura
+  pinMode(PIN_SOLENOIDE, OUTPUT);
+  digitalWrite(PIN_SOLENOIDE, LOW);  // aseguramos cerrada al inicio
+
+
   conectarWiFi();
 
   mqttClient.setServer(mqtt_server, mqtt_port);
+  mqttClient.setCallback(mqttCallback); //CERRADURA
   reconnectMQTT();
 
   initTime();
@@ -363,6 +443,11 @@ void setup() {
 // -------------------------- LOOP -----------------------------
 // ------------------------------------------------------------
 void loop() {
+  
+  if (lockOpen && millis() > tClose) {
+    cerrarCerradura();
+  }
+
   // FreeRTOS tasks gestionan todo
   vTaskDelay(pdMS_TO_TICKS(1000));
 }
